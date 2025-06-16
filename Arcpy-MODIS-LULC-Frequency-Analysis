@@ -1,0 +1,63 @@
+import arcpy
+import os
+from arcpy.sa import *
+
+# Set environment settings
+workspace = r"E:\\Work\\Cairo-Lt-day"
+arcpy.env.workspace = workspace
+
+# Paths
+input_raster = "reclassified_lt8-clipped-Cairo_layer.tif"
+int_raster_path = os.path.join(workspace, "int_raster.tif")
+polygon_path = os.path.join(workspace, "raster_to_polygon.shp")
+output_path = r"E:\\Work\\Dr.Kenway\\Thermal-comfort-2024\\Meetings\\15-7-2024\\Trends\\daytime\\lt_day\\Cairo-Lt-day\\Percentage\\8"
+frequency_table = os.path.join(output_path, "frequency_table.dbf")
+
+# Ensure the output directory exists
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
+
+# Check out the ArcGIS Spatial Analyst extension license
+arcpy.CheckOutExtension("Spatial")
+
+try:
+    # Convert raster to integer
+    int_raster = Int(Raster(input_raster))
+    int_raster.save(int_raster_path)
+
+    # Convert integer raster to polygon
+    arcpy.RasterToPolygon_conversion(int_raster_path, polygon_path, "NO_SIMPLIFY", "Value")
+
+    # Add a new field for area in square kilometers
+    arcpy.AddField_management(polygon_path, "Area_km2", "DOUBLE")
+
+    # Calculate the area in square kilometers
+    arcpy.CalculateField_management(polygon_path, "Area_km2", "!shape.area@SQUAREKILOMETERS!", "PYTHON3")
+
+    # Use the Frequency tool to combine the frequency categories and calculate the total area for each category
+    arcpy.analysis.Frequency(polygon_path, frequency_table, ["gridcode"], ["Area_km2"])
+
+    # Calculate the total area
+    total_area = 0
+    with arcpy.da.SearchCursor(frequency_table, ["Area_km2"]) as cursor:
+        total_area = sum(row[0] for row in cursor)
+
+    # Add a new field for the percentage
+    arcpy.AddField_management(frequency_table, "Percentage", "DOUBLE")
+
+    # Calculate the percentage of each category from the total area
+    with arcpy.da.UpdateCursor(frequency_table, ["Area_km2", "Percentage"]) as cursor:
+        for row in cursor:
+            row[1] = (row[0] / total_area) * 100
+            cursor.updateRow(row)
+
+    # Print the results for verification
+    with arcpy.da.SearchCursor(frequency_table, ["gridcode", "FREQUENCY", "Area_km2", "Percentage"]) as cursor:
+        for row in cursor:
+            print(f"Category {row[0]}: Frequency {row[1]}, Total Area {row[2]:.2f} square kilometers, Percentage {row[3]:.2f}%")
+
+    print("Frequency analysis completed.")
+
+finally:
+    # Check in the ArcGIS Spatial Analyst extension license
+    arcpy.CheckInExtension("Spatial")
